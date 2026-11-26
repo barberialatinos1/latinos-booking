@@ -45,8 +45,8 @@ footer{text-align:center;padding:24px 0 35px;color:#777e87;font-size:11px;letter
 <section class="panel">
 <h2 class="step-title"><span class="step-no">3</span> Fecha y hora</h2>
 <div class="field"><label class="label" for="date">Fecha de tu cita</label><input id="date" type="date"></div>
-<div class="field"><span class="label">Horarios disponibles · demostración</span><div class="slots" id="slots"></div></div>
-<p class="note">Lunes a sábado: 10:00 a. m. – 1:00 p. m. y 2:00 p. m. – 7:30 p. m. Los horarios mostrados son ilustrativos hasta conectar la agenda real.</p>
+<div class="field"><span class="label">Horarios disponibles</span><div class="slots" id="slots"><p class="note">Selecciona fecha para consultar disponibilidad.</p></div></div>
+<p class="note">Los horarios se consultan en tiempo real. Los horarios se ofrecen en intervalos de 10 minutos, según la disponibilidad real y los horarios configurados por la barbería.</p>
 </section>
 <section class="panel">
 <h2 class="step-title"><span class="step-no">4</span> Tus datos</h2>
@@ -57,28 +57,204 @@ footer{text-align:center;padding:24px 0 35px;color:#777e87;font-size:11px;letter
 <section class="panel">
 <h2 class="step-title"><span class="step-no">✓</span> Resumen de tu cita</h2>
 <div class="summary" id="summary"></div>
-<div class="actions"><button class="btn primary" id="confirm">CONTINUAR</button></div>
-<p class="note">Prototipo de navegación. Esta versión todavía no registra reservas ni recibe anticipos. La conexión con Supabase se activará en la siguiente etapa.</p>
+<div class="actions"><button class="btn primary" id="confirm" type="button" disabled>CONFIRMAR RESERVA</button></div>
+<p class="note">Tu solicitud quedará registrada como pendiente. El anticipo se coordinará por separado; esta página todavía no procesa pagos.</p>
 </section>
 </main>
 <footer>LATINOS BOOKING · CL. 17A NORTE #6-64 · GRANADA, CALI</footer>
 <div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const services=[
-["Corte normal (incluye niños)",40000,40],["Corte con tijera",45000,45],["Corte con barba",50000,60],["Barba",25000,30],["Marcación",20000,20],["Barba y marcación",30000,35],["Corte + tinte",60000,90],["Corte + barba + tinte",65000,105],["Corte + limpieza facial",120000,90],["Corte + tinte + barba + limpieza facial",150000,150],["Limpieza facial",100000,60]
+const SUPABASE_URL = "https://etjlxoampwosgznnqssf.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_hTBf5wMrmUBisbB77ONL_A_fiXN6NF8";
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const barbers = [
+  { id: "821ab603-0571-45a9-88e8-507da71b8774", name: "Jhonathan" },
+  { id: "3a60b204-17f9-4082-8d8a-9d360996f9de", name: "Jhon" }
 ];
-let barber="Jhonathan", selected=services[0], time="10:00";
-const fmt=n=>"$"+n.toLocaleString("es-CO")+" COP";
-const servicesEl=document.getElementById("services");
-services.forEach((s,i)=>{let b=document.createElement("button");b.className="service"+(!i?" active":"");b.innerHTML=`<span>${s[0]}<small>${s[2]} minutos</small></span><b>${fmt(s[1])}</b>`;b.onclick=()=>{selected=s;document.querySelectorAll(".service").forEach(x=>x.classList.toggle("active",x===b));summary()};servicesEl.appendChild(b)});
-document.querySelectorAll("[data-barber]").forEach(b=>b.onclick=()=>{barber=b.dataset.barber;document.querySelectorAll("[data-barber]").forEach(x=>x.classList.toggle("active",x===b));summary()});
-const slots=["10:00","10:15","10:30","10:45","11:00","11:15","11:30","11:45","12:00","12:15","14:00","14:15","14:30","14:45","15:00","15:15","15:30","15:45","16:00","16:15","16:30","16:45","17:00","17:15","17:30","17:45","18:00","18:15","18:30","18:45"];
-slots.forEach(t=>{let b=document.createElement("button");b.className="slot"+(t===time?" active":"");b.textContent=t;b.onclick=()=>{time=t;document.querySelectorAll(".slot").forEach(x=>x.classList.toggle("active",x===b));summary()};document.getElementById("slots").appendChild(b)});
-const date=document.getElementById("date");const today=new Date();date.min=new Date(today.getTime()-today.getTimezoneOffset()*60000).toISOString().slice(0,10);date.value=date.min;
-["name","phone","email"].forEach(id=>document.getElementById(id).addEventListener("input",summary));date.onchange=summary;
-function summary(){document.getElementById("summary").innerHTML=`Barbero: <b>${barber}</b><br>Servicio: <b>${selected[0]}</b><br>Fecha: <b>${date.value}</b><br>Hora: <b>${time}</b><br>Duración: <b>${selected[2]} minutos</b><br><br>Precio: <b>${fmt(selected[1])}</b><br>Anticipo estimado (30%): <b>${fmt(Math.ceil(selected[1]*.3))}</b><br>Saldo: <b>${fmt(selected[1]-Math.ceil(selected[1]*.3))}</b>`}
-function toast(t){let el=document.getElementById("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),3600)}
-document.getElementById("confirm").onclick=()=>{let n=document.getElementById("name").value.trim(),p=document.getElementById("phone").value.trim();if(!n||!p){toast("Completa tu nombre y WhatsApp para continuar.");return}toast("Demostración lista. La reserva real se habilitará al conectar Supabase.")};
-summary();
+let barber = barbers[0];
+let services = [];
+let selectedService = null;
+let selectedSlot = null;
+let slotRows = [];
+let loadingSlots = false;
+
+const fmt = n => "$" + Number(n).toLocaleString("es-CO") + " COP";
+const servicesEl = document.getElementById("services");
+const slotsEl = document.getElementById("slots");
+const date = document.getElementById("date");
+const confirmBtn = document.getElementById("confirm");
+const localToday = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+date.min = localToday;
+date.value = localToday;
+
+function toast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 4200);
+}
+function setBusy(busy, label) {
+  confirmBtn.disabled = busy;
+  confirmBtn.textContent = label || (busy ? "PROCESANDO…" : "CONFIRMAR RESERVA");
+}
+function renderBarbers() {
+  document.querySelectorAll("[data-barber]").forEach(button => {
+    button.classList.toggle("active", button.dataset.barber === barber.name);
+    button.onclick = () => {
+      barber = barbers.find(item => item.name === button.dataset.barber);
+      selectedSlot = null;
+      renderBarbers();
+      loadSlots();
+      renderSummary();
+    };
+  });
+}
+function renderServices() {
+  servicesEl.innerHTML = "";
+  services.forEach(service => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "service" + (selectedService?.id === service.id ? " active" : "");
+    const info = document.createElement("span");
+    info.append(document.createTextNode(service.name));
+    const small = document.createElement("small");
+    small.textContent = `${service.duration_minutes} minutos`;
+    info.appendChild(small);
+    const price = document.createElement("b");
+    price.textContent = fmt(service.price_cop);
+    button.append(info, price);
+    button.onclick = () => {
+      selectedService = service;
+      selectedSlot = null;
+      renderServices();
+      loadSlots();
+      renderSummary();
+    };
+    servicesEl.appendChild(button);
+  });
+}
+function bogotaTime(iso) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "America/Bogota", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+}
+async function loadServices() {
+  servicesEl.innerHTML = '<p class="note">Cargando servicios…</p>';
+  const { data, error } = await db.from("services")
+    .select("id,name,price_cop,duration_minutes")
+    .eq("active", true)
+    .order("name");
+  if (error) {
+    servicesEl.innerHTML = '<p class="note">No pudimos cargar los servicios. Intenta recargar la página.</p>';
+    console.error(error);
+    toast("No fue posible cargar los servicios.");
+    return;
+  }
+  services = data || [];
+  // Keep the catalog order familiar to customers.
+  const preferred = ["Corte normal (incluye niños)","Corte con tijera","Corte con barba","Barba","Marcación","Barba y marcación","Corte + tinte","Corte + barba + tinte","Corte + limpieza facial","Corte + tinte + barba + limpieza facial","Limpieza facial"];
+  services.sort((a,b) => preferred.indexOf(a.name) - preferred.indexOf(b.name));
+  selectedService = services.find(s => s.name === "Corte normal (incluye niños)") || services[0] || null;
+  renderServices();
+  renderSummary();
+  await loadSlots();
+}
+async function loadSlots() {
+  selectedSlot = null;
+  slotRows = [];
+  if (!selectedService || !date.value) {
+    slotsEl.innerHTML = '<p class="note">Selecciona un servicio y una fecha.</p>';
+    renderSummary();
+    return;
+  }
+  loadingSlots = true;
+  slotsEl.innerHTML = '<p class="note">Consultando disponibilidad…</p>';
+  renderSummary();
+  const { data, error } = await db.rpc("get_available_slots", {
+    p_barber_id: barber.id,
+    p_service_id: selectedService.id,
+    p_date: date.value
+  });
+  loadingSlots = false;
+  if (error) {
+    slotsEl.innerHTML = '<p class="note">No pudimos consultar los horarios. Intenta nuevamente.</p>';
+    console.error(error);
+    toast("Error consultando horarios disponibles.");
+    renderSummary();
+    return;
+  }
+  slotRows = (data || []).map(row => ({ iso: row.starts_at, time: bogotaTime(row.starts_at) }));
+  if (!slotRows.length) {
+    slotsEl.innerHTML = '<p class="note">No hay horarios disponibles para esta fecha y servicio. Prueba otro día.</p>';
+    renderSummary();
+    return;
+  }
+  slotsEl.innerHTML = "";
+  slotRows.forEach(slot => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "slot";
+    button.textContent = slot.time;
+    button.onclick = () => {
+      selectedSlot = slot;
+      slotsEl.querySelectorAll(".slot").forEach(el => el.classList.toggle("active", el === button));
+      renderSummary();
+    };
+    slotsEl.appendChild(button);
+  });
+  renderSummary();
+}
+function renderSummary() {
+  const summary = document.getElementById("summary");
+  if (!selectedService) {
+    summary.textContent = "Cargando catálogo de servicios…";
+    return;
+  }
+  const deposit = Math.ceil(Number(selectedService.price_cop) * 0.30);
+  const dateLabel = date.value || "Sin seleccionar";
+  const timeLabel = selectedSlot ? selectedSlot.time : "Sin seleccionar";
+  summary.innerHTML = `Barbero: <b>${barber.name}</b><br>Servicio: <b>${selectedService.name}</b><br>Fecha: <b>${dateLabel}</b><br>Hora: <b>${timeLabel}</b><br>Duración: <b>${selectedService.duration_minutes} minutos</b><br><br>Precio: <b>${fmt(selectedService.price_cop)}</b><br>Anticipo estimado (30%): <b>${fmt(deposit)}</b><br>Saldo: <b>${fmt(Number(selectedService.price_cop)-deposit)}</b>`;
+  confirmBtn.disabled = loadingSlots || !selectedSlot || !selectedService;
+}
+async function createBooking() {
+  const name = document.getElementById("name").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  const email = document.getElementById("email").value.trim();
+  if (!name || !phone) { toast("Completa tu nombre y WhatsApp."); return; }
+  if (!selectedService || !selectedSlot) { toast("Selecciona un servicio, fecha y horario disponible."); return; }
+  setBusy(true, "REGISTRANDO CITA…");
+  const { data, error } = await db.rpc("create_booking", {
+    p_barber_id: barber.id,
+    p_service_id: selectedService.id,
+    p_date: date.value,
+    p_start_time: selectedSlot.time,
+    p_customer_name: name,
+    p_customer_phone: phone,
+    p_customer_email: email || null
+  });
+  if (error) {
+    console.error(error);
+    setBusy(false);
+    toast(error.message || "No pudimos registrar la cita. Selecciona otro horario.");
+    await loadSlots();
+    return;
+  }
+  const booking = Array.isArray(data) ? data[0] : data;
+  if (!booking) {
+    setBusy(false);
+    toast("No recibimos confirmación de la reserva. Contacta a la barbería.");
+    return;
+  }
+  document.getElementById("summary").innerHTML = ` <b>¡Solicitud registrada!</b><br>Estado: <b>Pendiente de confirmación</b><br>Barbero: <b>${barber.name}</b><br>Servicio: <b>${booking.service_name}</b><br>Fecha: <b>${date.value}</b><br>Hora: <b>${selectedSlot.time}</b><br>Precio: <b>${fmt(booking.price_cop)}</b><br>Anticipo estimado (30%): <b>${fmt(booking.deposit_cop)}</b><br><br>Número de solicitud: <b>${booking.appointment_id}</b>`;
+  confirmBtn.textContent = "CITA REGISTRADA";
+  confirmBtn.disabled = true;
+  toast("Tu solicitud quedó registrada. La barbería debe confirmarla.");
+}
+date.addEventListener("change", () => { selectedSlot = null; loadSlots(); });
+["name","phone","email"].forEach(id => document.getElementById(id).addEventListener("input", renderSummary));
+confirmBtn.addEventListener("click", createBooking);
+renderBarbers();
+loadServices();
 </script>
 </body></html>
